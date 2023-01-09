@@ -1,6 +1,7 @@
 #![no_main]
 #![no_std]
 
+use cortex_m::asm::delay;
 use cortex_m_rt::entry;
 use panic_probe as _;
 use rtt_target::{rprintln, rtt_init_print};
@@ -25,10 +26,16 @@ fn main() -> ! {
     let gpiob = dp.GPIOB.split(&mut rcc);
     let gpioc = dp.GPIOC.split(&mut rcc);
 
-    let sda = gpioa.pa10.into_open_drain_output_in_state(PinState::High);
-    let scl = gpioa.pa9.into_open_drain_output_in_state(PinState::High);
+    let sda = gpioa.pa12.into_open_drain_output_in_state(PinState::Low);
+    let scl = gpioa.pa11.into_open_drain_output_in_state(PinState::Low);
 
-    let mut i2c = dp.I2C1.i2c(sda, scl, i2c::Config::new(100.khz()), &mut rcc);
+    let mut timer = dp.TIM17.timer(&mut rcc);
+    timer.start(50.micros());
+
+    let mut delay = dp.TIM16.delay(&mut rcc);
+
+    // let mut i2c = dp.I2C1.i2c(sda, scl, i2c::Config::new(100.khz()), &mut rcc);
+    let mut i2c = bitbang_hal::i2c::I2cBB::new(sda, scl, timer);
     let mut pin_led_green = gpioa.pa3.into_push_pull_output();
     let mut pin_switch = gpioa.pa0.into_push_pull_output();
     let mut pin_led_red_128 = gpioc.pc6.into_push_pull_output();
@@ -66,19 +73,88 @@ fn main() -> ! {
     pins.pin_red_2.set_low().ok();
     pins.pin_red_1.set_low().ok();
     pins.pin_green.set_low().ok();
-    pins.pin_en_accl_top.set_high().ok();
+    pins.pin_en_accl_top.set_low().ok();
+    pins.pin_en_accl_bottom.set_low().ok();
+    delay.delay(500.millis());
+
+    pins.pin_green.set_high().ok();
+    pins.pin_red_128.set_high().ok();
 
     let mut buf: [u8; 1] = [0];
+    let mut xout_up;
+    let mut xout_low;
+    /*let mut yout_up;
+    let mut yout_low;
+    let mut zout_up;
+    let mut zout_low;*/
     loop {
-        match i2c.read(0x03, &mut buf) {
-            Ok(_) => rprintln!("Xout Upper {}", buf[0]),
+        match i2c.write_read(0x15, &[0x03], &mut buf) {
+            Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
-        match i2c.read(0x04, &mut buf) {
-            Ok(_) => rprintln!("Xout Upper {}", buf[0]),
+        xout_up = buf[0];
+
+        match i2c.write_read(0x15, &[0x04], &mut buf) {
+            Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
-        pins.pin_green.set_high().ok();
+        xout_low = buf[0];
+        /*match i2c.write_read(0x15, &[0x05], &mut buf) {
+            Ok(_) => rprintln!(""),
+            Err(err) => rprintln!("error: {:?}", err),
+        }
+        yout_up = buf[0];
+        match i2c.write_read(0x15, &[0x06], &mut buf) {
+            Ok(_) => rprintln!(""),
+            Err(err) => rprintln!("error: {:?}", err),
+        }
+        yout_low = buf[0];
+        match i2c.write_read(0x15, &[0x07], &mut buf) {
+            Ok(_) => rprintln!(""),
+            Err(err) => rprintln!("error: {:?}", err),
+        }
+        zout_up = buf[0];
+        match i2c.write_read(0x15, &[0x08], &mut buf) {
+            Ok(_) => rprintln!(""),
+            Err(err) => rprintln!("error: {:?}", err),
+        }
+        zout_low = buf[0];*/
+        let x1 = i16::from_be_bytes([xout_up, xout_low]) >> 4;
+        delay.delay(750.millis());
+        match i2c.write_read(0x15, &[0x03], &mut buf) {
+            Ok(_) => rprintln!(""),
+            Err(err) => rprintln!("error: {:?}", err),
+        }
+        xout_up = buf[0];
+
+        match i2c.write_read(0x15, &[0x04], &mut buf) {
+            Ok(_) => rprintln!(""),
+            Err(err) => rprintln!("error: {:?}", err),
+        }
+        xout_low = buf[0];
+        let x2 = i16::from_be_bytes([xout_up, xout_low]) >> 4;
+        let op = detection(x1, x2);
+        if op == true{
+            rprintln!("Bottle opened");
+             pins.pin_red_2.set_high().ok();
+             delay.delay(350.millis());
+             pins.pin_red_2.set_low().ok();
+        }
+        /*let x = i16::from_be_bytes([xout_up, xout_low]) >> 4;
+        rprintln!("Xout {}", x);
+        let y = i16::from_be_bytes([yout_up, yout_low]) >> 4;
+        rprintln!("Yout {}", y);
+        let z = i16::from_be_bytes([zout_up, zout_low]) >> 4;
+        rprintln!("Zout {}", z);
+
+        delay.delay(300.millis())*/;
+    }
+}
+fn detection(x1: i16, x2: i16) -> bool {
+    if x1 - x2 >= 600 {
+        return true;
+    } else {
+        return false;
     }
 }
 
