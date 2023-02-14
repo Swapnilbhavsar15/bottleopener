@@ -1,14 +1,14 @@
 #![no_main]
 #![no_std]
 
-use cortex_m::asm::delay;
 use cortex_m_rt::entry;
+use heapless::{Deque, Vec};
 use panic_probe as _;
 use rtt_target::{rprintln, rtt_init_print};
 use stm32g0xx_hal::gpio::gpioa::{PA0, PA1, PA10, PA15, PA2, PA3, PA4, PA5, PA6, PA7, PA8, PA9};
 use stm32g0xx_hal::gpio::gpiob::{PB, PB0, PB1};
 use stm32g0xx_hal::gpio::gpioc::PC6;
-use stm32g0xx_hal::gpio::{OpenDrain, Output, PushPull};
+use stm32g0xx_hal::gpio::{OpenDrain, Output, PushPull, PB4, PB5, PC14, PC15};
 use stm32g0xx_hal::prelude::*;
 use stm32g0xx_hal::{i2c, stm32};
 
@@ -35,7 +35,7 @@ fn main() -> ! {
     let mut delay = dp.TIM16.delay(&mut rcc);
 
     // let mut i2c = dp.I2C1.i2c(sda, scl, i2c::Config::new(100.khz()), &mut rcc);
-    let mut i2c = bitbang_hal::i2c::I2cBB::new(sda, scl, timer);
+    let mut i2c = bitbang_hal::i2c::I2cBB::new(scl, sda, timer);
     let mut pin_led_green = gpioa.pa3.into_push_pull_output();
     let mut pin_switch = gpioa.pa0.into_push_pull_output();
     let mut pin_led_red_128 = gpioc.pc6.into_push_pull_output();
@@ -46,8 +46,12 @@ fn main() -> ! {
     let mut pin_led_red_4 = gpioa.pa6.into_push_pull_output();
     let mut pin_led_red_2 = gpioa.pa5.into_push_pull_output();
     let mut pin_led_red_1 = gpioa.pa4.into_push_pull_output();
-    let mut pin_en_accl_bottom = gpioa.pa2.into_push_pull_output();
-    let mut pin_en_accl_top = gpioa.pa15.into_push_pull_output();
+    let mut pin_en_accl_lower_right = gpioa.pa2.into_push_pull_output();
+    let mut pin_en_accl_lower_mid = gpioc.pc15.into_push_pull_output();
+    let mut pin_en_accl_lower_left = gpioc.pc14.into_push_pull_output();
+    let mut pin_en_accl_upper_right = gpioa.pa15.into_push_pull_output();
+    let mut pin_en_accl_upper_mid = gpiob.pb4.into_push_pull_output();
+    let mut pin_en_accl_upper_left = gpiob.pb5.into_push_pull_output();
 
     let mut pins = Pins {
         pin_red_1: pin_led_red_1,
@@ -60,8 +64,12 @@ fn main() -> ! {
         pin_red_128: pin_led_red_128,
         pin_green: pin_led_green,
         pin_switch: pin_switch,
-        pin_en_accl_bottom: pin_en_accl_bottom,
-        pin_en_accl_top: pin_en_accl_top,
+        pin_en_accl_lower_right: pin_en_accl_lower_right,
+        pin_en_accl_lower_mid: pin_en_accl_lower_mid,
+        pin_en_accl_lower_left: pin_en_accl_lower_left,
+        pin_en_accl_upper_right: pin_en_accl_upper_right,
+        pin_en_accl_upper_mid: pin_en_accl_upper_mid,
+        pin_en_accl_upper_left: pin_en_accl_upper_left,
     };
 
     pins.pin_red_128.set_low().ok();
@@ -73,21 +81,33 @@ fn main() -> ! {
     pins.pin_red_2.set_low().ok();
     pins.pin_red_1.set_low().ok();
     pins.pin_green.set_low().ok();
-    pins.pin_en_accl_top.set_low().ok();
-    pins.pin_en_accl_bottom.set_low().ok();
+    pins.pin_en_accl_upper_right.set_high().ok();
     delay.delay(500.millis());
 
     pins.pin_green.set_high().ok();
-    pins.pin_red_128.set_high().ok();
 
     let mut buf: [u8; 1] = [0];
     let mut xout_up;
     let mut xout_low;
-    /*let mut yout_up;
+    let mut yout_up;
     let mut yout_low;
     let mut zout_up;
-    let mut zout_low;*/
+    let mut zout_low;
+    let mut size = 24;
+
+    let mut state = State {
+        x: Vec::new(),
+        y: Vec::new(),
+        z: Vec::new(),
+        x_avg: Vec::new(),
+        y_avg: Vec::new(),
+        z_avg: Vec::new(),
+    };
+
     loop {
+        let mut sum_x = 0;
+        let mut sum_y = 0;
+        let mut sum_z = 0;
         match i2c.write_read(0x15, &[0x03], &mut buf) {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
@@ -99,7 +119,7 @@ fn main() -> ! {
             Err(err) => rprintln!("error: {:?}", err),
         }
         xout_low = buf[0];
-        /*match i2c.write_read(0x15, &[0x05], &mut buf) {
+        match i2c.write_read(0x15, &[0x05], &mut buf) {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
@@ -118,8 +138,8 @@ fn main() -> ! {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
-        zout_low = buf[0];*/
-        let x1 = i16::from_be_bytes([xout_up, xout_low]) >> 4;
+        zout_low = buf[0];
+        /*let x1 = i16::from_be_bytes([xout_up, xout_low]) >> 4;
         delay.delay(750.millis());
         match i2c.write_read(0x15, &[0x03], &mut buf) {
             Ok(_) => rprintln!(""),
@@ -134,28 +154,124 @@ fn main() -> ! {
         xout_low = buf[0];
         let x2 = i16::from_be_bytes([xout_up, xout_low]) >> 4;
         let op = detection(x1, x2);
-        if op == true{
+        if op == true {
             rprintln!("Bottle opened");
-             pins.pin_red_2.set_high().ok();
-             delay.delay(350.millis());
-             pins.pin_red_2.set_low().ok();
+            pins.pin_red_128.set_high().ok();
+            delay.delay(350.millis());
+            pins.pin_red_128.set_low().ok();
+        }*/
+        if state.x.is_full() {
+            state.x.remove(0);
+            state.y.remove(0);
+            state.z.remove(0);
         }
-        /*let x = i16::from_be_bytes([xout_up, xout_low]) >> 4;
-        rprintln!("Xout {}", x);
+        let x = i16::from_be_bytes([xout_up, xout_low]) >> 4;
+        state.x.push(x).ok();
         let y = i16::from_be_bytes([yout_up, yout_low]) >> 4;
-        rprintln!("Yout {}", y);
+        state.y.push(y).ok();
         let z = i16::from_be_bytes([zout_up, zout_low]) >> 4;
-        rprintln!("Zout {}", z);
+        state.z.push(z).ok();
 
-        delay.delay(300.millis())*/;
+        rprintln!("state.x");
+        for a in &state.x {
+            rprintln!("{}", a);
+            sum_x += a;
+        }
+        rprintln!("state.y");
+        for b in &state.y {
+            rprintln!("{}", b);
+            sum_y += b;
+        }
+        rprintln!("state.z");
+        for c in &state.z {
+            rprintln!("{}", c);
+            sum_z += c;
+        }
+
+        // rprintln!("state.z: {:?}", state.z);
+        // let sum_z2: i16 = state.z.iter().sum();
+
+        average((sum_x / size), (sum_y / size), (sum_z / size), &mut state);
+        if state.x.is_full() {
+            let a: bool = detect(&state);
+            if a {
+                rprintln!("Bottle opened");
+                pins.pin_red_128.set_high().ok();
+                delay.delay(350.millis());
+                pins.pin_red_128.set_low().ok();
+            }
+        }
+
+        delay.delay(5.millis());
     }
 }
-fn detection(x1: i16, x2: i16) -> bool {
-    if x1 - x2 >= 600 {
-        return true;
-    } else {
-        return false;
+
+fn average(x: i16, y: i16, z: i16, state: &mut State) {
+    if state.x_avg.is_full() {
+        state.x_avg.remove(0);
+        state.y_avg.remove(0);
+        state.z_avg.remove(0);
     }
+    state.x_avg.push(x).unwrap();
+    state.y_avg.push(y).unwrap();
+    state.z_avg.push(z).unwrap();
+
+    rprintln!("X_avg");
+    for a in &state.x_avg {
+        rprintln!("{}", a);
+    }
+    rprintln!("Y_avg");
+    for b in &state.y_avg {
+        rprintln!("{}", b);
+    }
+    rprintln!("Z_avg");
+    for c in &state.z_avg {
+        rprintln!("{}", c);
+    }
+}
+
+fn detect(state: &State) -> bool {
+    let x_avg1: i16 = state.x_avg[23];
+    let x_avg2: i16 = state.x_avg[0];
+    let x2: i16 = state.x[23];
+    let x1: i16 = state.x[22];
+    let mut avg: i16 = 0;
+    for a in 0..8 {
+        avg += state.x_avg[a];
+    }
+    avg /= 8;
+    x1 > 0
+        && x2 < 0
+        && x2 - x1 < (-1000)
+        && x_avg2 - x_avg1 <= 400
+        && x_avg2 - x_avg1 >= 0
+        && x_avg1 > 0
+        && x_avg2 > 0
+        && avg - 20 <= state.x_avg[0]
+        && state.x_avg[0] <= avg + 10
+        && avg - 20 <= state.x_avg[1]
+        && state.x_avg[1] <= avg + 10
+        && avg - 20 <= state.x_avg[2]
+        && state.x_avg[2] <= avg + 10
+        && avg - 20 <= state.x_avg[3]
+        && state.x_avg[3] <= avg + 10
+        && avg - 20 <= state.x_avg[4]
+        && state.x_avg[4] <= avg + 10
+        && avg - 20 <= state.x_avg[5]
+        && state.x_avg[5] <= avg + 10
+        && avg - 20 <= state.x_avg[6]
+        && state.x_avg[6] <= avg + 10
+        && avg - 20 <= state.x_avg[7]
+        && state.x_avg[7] <= avg + 10
+}
+
+struct State {
+    x: Vec<i16, 24>,
+    y: Vec<i16, 24>,
+    z: Vec<i16, 24>,
+    x_avg: Vec<i16, 24>,
+    y_avg: Vec<i16, 24>,
+    z_avg: Vec<i16, 24>,
 }
 
 struct Pins {
@@ -169,6 +285,10 @@ struct Pins {
     pin_red_128: PC6<Output<PushPull>>,
     pin_green: PA3<Output<PushPull>>,
     pin_switch: PA0<Output<PushPull>>,
-    pin_en_accl_bottom: PA2<Output<PushPull>>,
-    pin_en_accl_top: PA15<Output<PushPull>>,
+    pin_en_accl_lower_right: PA2<Output<PushPull>>,
+    pin_en_accl_lower_mid: PC15<Output<PushPull>>,
+    pin_en_accl_lower_left: PC14<Output<PushPull>>,
+    pin_en_accl_upper_right: PA15<Output<PushPull>>,
+    pin_en_accl_upper_mid: PB4<Output<PushPull>>,
+    pin_en_accl_upper_left: PB5<Output<PushPull>>,
 }
