@@ -1,16 +1,20 @@
 #![no_main]
 #![no_std]
-
+#![allow(unused_imports)]
+use crate::stm32::FLASH;
 use cortex_m_rt::entry;
-use heapless::{Deque, Vec};
+use heapless::Vec;
 use panic_probe as _;
 use rtt_target::{rprintln, rtt_init_print};
+use stm32g0xx_hal::flash::{FlashPage, UnlockedFlash, WriteErase};
 use stm32g0xx_hal::gpio::gpioa::{PA0, PA1, PA10, PA15, PA2, PA3, PA4, PA5, PA6, PA7, PA8, PA9};
 use stm32g0xx_hal::gpio::gpiob::{PB, PB0, PB1};
 use stm32g0xx_hal::gpio::gpioc::PC6;
 use stm32g0xx_hal::gpio::{OpenDrain, Output, PushPull, PB4, PB5, PC14, PC15};
 use stm32g0xx_hal::prelude::*;
-use stm32g0xx_hal::{i2c, stm32};
+use stm32g0xx_hal::stm32;
+use stm32g0xx_hal::time::MicroSecond;
+use stm32g0xx_hal::timer::stopwatch::Stopwatch;
 
 #[entry]
 fn main() -> ! {
@@ -31,27 +35,35 @@ fn main() -> ! {
 
     let mut timer = dp.TIM17.timer(&mut rcc);
     timer.start(50.micros());
+    let mut i2c = bitbang_hal::i2c::I2cBB::new(scl, sda, timer);
 
     let mut delay = dp.TIM16.delay(&mut rcc);
 
+    let stopwatch = Stopwatch::tim1(dp.TIM1, &mut rcc);
+    let now = stopwatch.now();
+    let elapsed = stopwatch.elapsed(now);
+    let mut count: u8 = 2;
+
+    let flash = dp.FLASH;
+
     // let mut i2c = dp.I2C1.i2c(sda, scl, i2c::Config::new(100.khz()), &mut rcc);
-    let mut i2c = bitbang_hal::i2c::I2cBB::new(scl, sda, timer);
-    let mut pin_led_green = gpioa.pa3.into_push_pull_output();
-    let mut pin_switch = gpioa.pa0.into_push_pull_output();
-    let mut pin_led_red_128 = gpioc.pc6.into_push_pull_output();
-    let mut pin_led_red_64 = gpioa.pa8.into_push_pull_output();
-    let mut pin_led_red_32 = gpiob.pb1.into_push_pull_output();
-    let mut pin_led_red_16 = gpiob.pb0.into_push_pull_output();
-    let mut pin_led_red_8 = gpioa.pa7.into_push_pull_output();
-    let mut pin_led_red_4 = gpioa.pa6.into_push_pull_output();
-    let mut pin_led_red_2 = gpioa.pa5.into_push_pull_output();
-    let mut pin_led_red_1 = gpioa.pa4.into_push_pull_output();
-    let mut pin_en_accl_lower_right = gpioa.pa2.into_push_pull_output();
-    let mut pin_en_accl_lower_mid = gpioc.pc15.into_push_pull_output();
-    let mut pin_en_accl_lower_left = gpioc.pc14.into_push_pull_output();
-    let mut pin_en_accl_upper_right = gpioa.pa15.into_push_pull_output();
-    let mut pin_en_accl_upper_mid = gpiob.pb4.into_push_pull_output();
-    let mut pin_en_accl_upper_left = gpiob.pb5.into_push_pull_output();
+    let pin_led_green = gpioa.pa3.into_push_pull_output();
+    let pin_switch = gpioa.pa0.into_push_pull_output();
+
+    let pin_led_red_128 = gpioc.pc6.into_push_pull_output();
+    let pin_led_red_64 = gpioa.pa8.into_push_pull_output();
+    let pin_led_red_32 = gpiob.pb1.into_push_pull_output();
+    let pin_led_red_16 = gpiob.pb0.into_push_pull_output();
+    let pin_led_red_8 = gpioa.pa7.into_push_pull_output();
+    let pin_led_red_4 = gpioa.pa6.into_push_pull_output();
+    let pin_led_red_2 = gpioa.pa5.into_push_pull_output();
+    let pin_led_red_1 = gpioa.pa4.into_push_pull_output();
+    let pin_en_accl_lower_right = gpioa.pa2.into_push_pull_output();
+    let pin_en_accl_lower_mid = gpioc.pc15.into_push_pull_output();
+    let pin_en_accl_lower_left = gpioc.pc14.into_push_pull_output();
+    let pin_en_accl_upper_right = gpioa.pa15.into_push_pull_output();
+    let pin_en_accl_upper_mid = gpiob.pb4.into_push_pull_output();
+    let pin_en_accl_upper_left = gpiob.pb5.into_push_pull_output();
 
     let mut pins = Pins {
         pin_red_1: pin_led_red_1,
@@ -93,8 +105,7 @@ fn main() -> ! {
     let mut yout_low;
     let mut zout_up;
     let mut zout_low;
-    let mut size = 24;
-
+    let size = 24;
     let mut state = State {
         x: Vec::new(),
         y: Vec::new(),
@@ -197,8 +208,10 @@ fn main() -> ! {
             if a {
                 rprintln!("Bottle opened");
                 pins.pin_red_128.set_high().ok();
-                delay.delay(350.millis());
-                pins.pin_red_128.set_low().ok();
+                count += 1;
+            } else if !a && elapsed > MicroSecond::micros(5_000_000) {
+                pins.pin_switch.set_high().ok();
+                pins.pin_red_128.set_high().ok();
             }
         }
 
@@ -242,27 +255,26 @@ fn detect(state: &State) -> bool {
     avg /= 8;
     x1 > 0
         && x2 < 0
-        && x2 - x1 < (-1000)
+        && x2 - x1 < (0)
         && x_avg2 - x_avg1 <= 400
-        && x_avg2 - x_avg1 >= 0
         && x_avg1 > 0
         && x_avg2 > 0
         && avg - 20 <= state.x_avg[0]
-        && state.x_avg[0] <= avg + 10
+        && state.x_avg[0] <= avg + 20
         && avg - 20 <= state.x_avg[1]
-        && state.x_avg[1] <= avg + 10
+        && state.x_avg[1] <= avg + 20
         && avg - 20 <= state.x_avg[2]
-        && state.x_avg[2] <= avg + 10
+        && state.x_avg[2] <= avg + 20
         && avg - 20 <= state.x_avg[3]
-        && state.x_avg[3] <= avg + 10
+        && state.x_avg[3] <= avg + 20
         && avg - 20 <= state.x_avg[4]
-        && state.x_avg[4] <= avg + 10
+        && state.x_avg[4] <= avg + 20
         && avg - 20 <= state.x_avg[5]
-        && state.x_avg[5] <= avg + 10
+        && state.x_avg[5] <= avg + 20
         && avg - 20 <= state.x_avg[6]
-        && state.x_avg[6] <= avg + 10
+        && state.x_avg[6] <= avg + 20
         && avg - 20 <= state.x_avg[7]
-        && state.x_avg[7] <= avg + 10
+        && state.x_avg[7] <= avg + 20
 }
 
 struct State {
