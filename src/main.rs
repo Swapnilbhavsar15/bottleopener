@@ -224,22 +224,23 @@ fn average(x: i16, y: i16, z: i16, state: &mut State) {
         state.x_avg.remove(0);
         state.y_avg.remove(0);
         state.z_avg.remove(0);
-    }
-    state.x_avg.push(x).unwrap();
-    state.y_avg.push(y).unwrap();
-    state.z_avg.push(z).unwrap();
 
-    rprintln!("X_avg");
-    for a in &state.x_avg {
-        rprintln!("{}", a);
-    }
-    rprintln!("Y_avg");
-    for b in &state.y_avg {
-        rprintln!("{}", b);
-    }
-    rprintln!("Z_avg");
-    for c in &state.z_avg {
-        rprintln!("{}", c);
+        state.x_avg.push(x).unwrap();
+        state.y_avg.push(y).unwrap();
+        state.z_avg.push(z).unwrap();
+
+        rprintln!("X_avg");
+        for a in &state.x_avg {
+            rprintln!("{}", a);
+        }
+        rprintln!("Y_avg");
+        for b in &state.y_avg {
+            rprintln!("{}", b);
+        }
+        rprintln!("Z_avg");
+        for c in &state.z_avg {
+            rprintln!("{}", c);
+        }
     }
 }
 
@@ -271,10 +272,6 @@ fn detect(state: &State) -> bool {
         && state.x_avg[4] <= avg + 20
         && avg - 20 <= state.x_avg[5]
         && state.x_avg[5] <= avg + 20
-        && avg - 20 <= state.x_avg[6]
-        && state.x_avg[6] <= avg + 20
-        && avg - 20 <= state.x_avg[7]
-        && state.x_avg[7] <= avg + 20
 }
 
 struct State {
