@@ -33,16 +33,16 @@ fn main() -> ! {
     let sda = gpioa.pa12.into_open_drain_output_in_state(PinState::Low);
     let scl = gpioa.pa11.into_open_drain_output_in_state(PinState::Low);
 
-    let mut timer = dp.TIM17.timer(&mut rcc);
-    timer.start(50.micros());
-    let mut i2c = bitbang_hal::i2c::I2cBB::new(scl, sda, timer);
+    let mut i2c_timer = dp.TIM17.timer(&mut rcc);
+    i2c_timer.start(50.micros());
+    let mut i2c = bitbang_hal::i2c::I2cBB::new(scl, sda, i2c_timer);
 
     let mut delay = dp.TIM16.delay(&mut rcc);
 
     let stopwatch = Stopwatch::tim1(dp.TIM1, &mut rcc);
     let now = stopwatch.now();
-    let elapsed = stopwatch.elapsed(now);
-    let mut count: u8 = 2;
+    let mut elapsed = stopwatch.elapsed(now);
+    let mut _bottle_opening_count: u8 = 2;
 
     let flash = dp.FLASH;
 
@@ -98,7 +98,7 @@ fn main() -> ! {
     pins.pin_en_accl_lower_left.set_low().ok();
     pins.pin_en_accl_upper_mid.set_low().ok();
     pins.pin_en_accl_upper_left.set_low().ok();
-    delay.delay(500.millis());
+    delay.delay(5.micros()); //turn on time for the accelerometer
 
     pins.pin_green.set_high().ok();
 
@@ -109,14 +109,15 @@ fn main() -> ! {
     let mut yout_low;
     let mut zout_up;
     let mut zout_low;
-    let size = 24; // size of the vector used
-    let addr = 0x15; // addreses of accelerometer as well as its registers
-    let addr_x_upper = 0x03;
-    let addr_x_lower = 0x04;
-    let addr_y_upper = 0x05;
-    let addr_y_lower = 0x06;
-    let addr_z_upper = 0x07;
-    let addr_z_lower = 0x08;
+    const VECTOR_SIZE: i16 = 24; // size of the vector used
+                                 // addresses of accelerometer as well as its registers
+    const ADDR: u8 = 0x15;
+    const ADDR_X_UPPER: u8 = 0x03;
+    const ADDR_X_LOWER: u8 = 0x04;
+    const ADDR_Y_UPPER: u8 = 0x05;
+    const ADDR_Y_LOWER: u8 = 0x06;
+    const ADDR_Z_UPPER: u8 = 0x07;
+    const ADDR_Z_LOWER: u8 = 0x08;
     let mut state = State {
         x: Vec::new(),
         y: Vec::new(),
@@ -130,33 +131,33 @@ fn main() -> ! {
         let mut sum_x = 0;
         let mut sum_y = 0;
         let mut sum_z = 0;
-        match i2c.write_read(addr, &[addr_x_upper], &mut buf) {
+        match i2c.write_read(ADDR, &[ADDR_X_UPPER], &mut buf) {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
         xout_up = buf[0];
 
-        match i2c.write_read(addr, &[addr_x_lower], &mut buf) {
+        match i2c.write_read(ADDR, &[ADDR_X_LOWER], &mut buf) {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
         xout_low = buf[0];
-        match i2c.write_read(addr, &[addr_y_upper], &mut buf) {
+        match i2c.write_read(ADDR, &[ADDR_Y_UPPER], &mut buf) {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
         yout_up = buf[0];
-        match i2c.write_read(addr, &[addr_y_lower], &mut buf) {
+        match i2c.write_read(ADDR, &[ADDR_Y_LOWER], &mut buf) {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
         yout_low = buf[0];
-        match i2c.write_read(addr, &[addr_z_upper], &mut buf) {
+        match i2c.write_read(ADDR, &[ADDR_Z_UPPER], &mut buf) {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
         zout_up = buf[0];
-        match i2c.write_read(addr, &[addr_z_lower], &mut buf) {
+        match i2c.write_read(ADDR, &[ADDR_Z_LOWER], &mut buf) {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
@@ -177,27 +178,33 @@ fn main() -> ! {
         rprintln!("state.x");
         for a in &state.x {
             rprintln!("{}", a);
-            sum_x += a;
+            sum_x += a; // sum to calculate average
         }
         rprintln!("state.y");
         for b in &state.y {
-            rprintln!("{}", b);
+            rprintln!("{}", b); // sum to calculate average
             sum_y += b;
         }
         rprintln!("state.z");
         for c in &state.z {
-            rprintln!("{}", c);
+            rprintln!("{}", c); // sum to calculate average
             sum_z += c;
         }
 
-        average(sum_x / size, sum_y / size, sum_z / size, &mut state);
+        average(
+            sum_x / VECTOR_SIZE,
+            sum_y / VECTOR_SIZE,
+            sum_z / VECTOR_SIZE,
+            &mut state,
+        );
         if state.x.is_full() {
             let a: bool = detect(&state);
+            elapsed = stopwatch.elapsed(now);
             if a {
                 rprintln!("Bottle opened");
                 pins.pin_red_128.set_high().ok();
-                count += 1;
-            } else if !a && elapsed > MicroSecond::micros(5_000_000) {
+                _bottle_opening_count += 1;
+            } else if elapsed > MicroSecond::micros(5_000_000) {
                 pins.pin_switch.set_high().ok();
                 pins.pin_red_128.set_high().ok();
             }
@@ -208,6 +215,7 @@ fn main() -> ! {
 }
 
 fn average(x: i16, y: i16, z: i16, state: &mut State) {
+    // Funtion to store values in average vector
     if state.x_avg.is_full() {
         state.x_avg.remove(0);
         state.y_avg.remove(0);
@@ -244,6 +252,7 @@ fn detect(state: &State) -> bool {
         avg += state.x_avg[a];
     }
     avg /= 8;
+    // All zeros set according to data analysis for detection
     x1 > 0
         && x2 < 0
         && x2 - x1 < (0)
