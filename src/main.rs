@@ -109,7 +109,14 @@ fn main() -> ! {
     let mut yout_low;
     let mut zout_up;
     let mut zout_low;
-    let size = 24;
+    let size = 24; // size of the vector used
+    let addr = 0x15; // addreses of accelerometer as well as its registers
+    let addr_x_upper = 0x03;
+    let addr_x_lower = 0x04;
+    let addr_y_upper = 0x05;
+    let addr_y_lower = 0x06;
+    let addr_z_upper = 0x07;
+    let addr_z_lower = 0x08;
     let mut state = State {
         x: Vec::new(),
         y: Vec::new(),
@@ -123,33 +130,33 @@ fn main() -> ! {
         let mut sum_x = 0;
         let mut sum_y = 0;
         let mut sum_z = 0;
-        match i2c.write_read(0x15, &[0x03], &mut buf) {
+        match i2c.write_read(addr, &[addr_x_upper], &mut buf) {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
         xout_up = buf[0];
 
-        match i2c.write_read(0x15, &[0x04], &mut buf) {
+        match i2c.write_read(addr, &[addr_x_lower], &mut buf) {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
         xout_low = buf[0];
-        match i2c.write_read(0x15, &[0x05], &mut buf) {
+        match i2c.write_read(addr, &[addr_y_upper], &mut buf) {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
         yout_up = buf[0];
-        match i2c.write_read(0x15, &[0x06], &mut buf) {
+        match i2c.write_read(addr, &[addr_y_lower], &mut buf) {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
         yout_low = buf[0];
-        match i2c.write_read(0x15, &[0x07], &mut buf) {
+        match i2c.write_read(addr, &[addr_z_upper], &mut buf) {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
         zout_up = buf[0];
-        match i2c.write_read(0x15, &[0x08], &mut buf) {
+        match i2c.write_read(addr, &[addr_z_lower], &mut buf) {
             Ok(_) => rprintln!(""),
             Err(err) => rprintln!("error: {:?}", err),
         }
@@ -160,11 +167,11 @@ fn main() -> ! {
             state.y.remove(0);
             state.z.remove(0);
         }
-        let x = i16::from_be_bytes([xout_up, xout_low]) >> 4;
+        let x = i16::from_be_bytes([xout_up, xout_low]) >> 4; //Shifted 4 bits data is 12 bits
         state.x.push(x).ok();
-        let y = i16::from_be_bytes([yout_up, yout_low]) >> 4;
+        let y = i16::from_be_bytes([yout_up, yout_low]) >> 4; //Shifted 4 bits data is 12 bits
         state.y.push(y).ok();
-        let z = i16::from_be_bytes([zout_up, zout_low]) >> 4;
+        let z = i16::from_be_bytes([zout_up, zout_low]) >> 4; //Shifted 4 bits data is 12 bits
         state.z.push(z).ok();
 
         rprintln!("state.x");
@@ -231,7 +238,8 @@ fn detect(state: &State) -> bool {
     let x2: i16 = state.x[23];
     let x1: i16 = state.x[22];
     let mut avg: i16 = 0;
-    let avg_drop: i16 = 400;
+    let avg_drop: i16 = 400; //Drop in avg vector when bottle opened
+    let range: i16 = 20; //limit of range for avg to which it can fluctuate
     for a in 0..8 {
         avg += state.x_avg[a];
     }
@@ -242,18 +250,18 @@ fn detect(state: &State) -> bool {
         && x_avg2 - x_avg1 <= avg_drop
         && x_avg1 > 0
         && x_avg2 > 0
-        && avg - 20 <= state.x_avg[0]
-        && state.x_avg[0] <= avg + 20
-        && avg - 20 <= state.x_avg[1]
-        && state.x_avg[1] <= avg + 20
-        && avg - 20 <= state.x_avg[2]
-        && state.x_avg[2] <= avg + 20
-        && avg - 20 <= state.x_avg[3]
-        && state.x_avg[3] <= avg + 20
-        && avg - 20 <= state.x_avg[4]
-        && state.x_avg[4] <= avg + 20
-        && avg - 20 <= state.x_avg[5]
-        && state.x_avg[5] <= avg + 20
+        && avg - range <= state.x_avg[0]
+        && state.x_avg[0] <= avg + range
+        && avg - range <= state.x_avg[1]
+        && state.x_avg[1] <= avg + range
+        && avg - range <= state.x_avg[2]
+        && state.x_avg[2] <= avg + range
+        && avg - range <= state.x_avg[3]
+        && state.x_avg[3] <= avg + range
+        && avg - range <= state.x_avg[4]
+        && state.x_avg[4] <= avg + range
+        && avg - range <= state.x_avg[5]
+        && state.x_avg[5] <= avg + range
 }
 
 struct State {
