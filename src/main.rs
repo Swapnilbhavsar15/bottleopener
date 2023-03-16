@@ -46,7 +46,6 @@ fn main() -> ! {
 
     let flash = dp.FLASH;
 
-    // let mut i2c = dp.I2C1.i2c(sda, scl, i2c::Config::new(100.khz()), &mut rcc);
     let pin_led_green = gpioa.pa3.into_push_pull_output();
     let pin_switch = gpioa.pa0.into_push_pull_output();
 
@@ -75,13 +74,13 @@ fn main() -> ! {
         pin_red_64: pin_led_red_64,
         pin_red_128: pin_led_red_128,
         pin_green: pin_led_green,
-        pin_switch: pin_switch,
-        pin_en_accl_lower_right: pin_en_accl_lower_right,
-        pin_en_accl_lower_mid: pin_en_accl_lower_mid,
-        pin_en_accl_lower_left: pin_en_accl_lower_left,
-        pin_en_accl_upper_right: pin_en_accl_upper_right,
-        pin_en_accl_upper_mid: pin_en_accl_upper_mid,
-        pin_en_accl_upper_left: pin_en_accl_upper_left,
+        pin_switch,
+        pin_en_accl_lower_right,
+        pin_en_accl_lower_mid,
+        pin_en_accl_lower_left,
+        pin_en_accl_upper_right,
+        pin_en_accl_upper_mid,
+        pin_en_accl_upper_left,
     };
 
     pins.pin_red_128.set_low().ok();
@@ -94,6 +93,11 @@ fn main() -> ! {
     pins.pin_red_1.set_low().ok();
     pins.pin_green.set_low().ok();
     pins.pin_en_accl_upper_right.set_high().ok();
+    pins.pin_en_accl_lower_right.set_low().ok();
+    pins.pin_en_accl_lower_mid.set_low().ok();
+    pins.pin_en_accl_lower_left.set_low().ok();
+    pins.pin_en_accl_upper_mid.set_low().ok();
+    pins.pin_en_accl_upper_left.set_low().ok();
     delay.delay(500.millis());
 
     pins.pin_green.set_high().ok();
@@ -150,27 +154,7 @@ fn main() -> ! {
             Err(err) => rprintln!("error: {:?}", err),
         }
         zout_low = buf[0];
-        /*let x1 = i16::from_be_bytes([xout_up, xout_low]) >> 4;
-        delay.delay(750.millis());
-        match i2c.write_read(0x15, &[0x03], &mut buf) {
-            Ok(_) => rprintln!(""),
-            Err(err) => rprintln!("error: {:?}", err),
-        }
-        xout_up = buf[0];
 
-        match i2c.write_read(0x15, &[0x04], &mut buf) {
-            Ok(_) => rprintln!(""),
-            Err(err) => rprintln!("error: {:?}", err),
-        }
-        xout_low = buf[0];
-        let x2 = i16::from_be_bytes([xout_up, xout_low]) >> 4;
-        let op = detection(x1, x2);
-        if op == true {
-            rprintln!("Bottle opened");
-            pins.pin_red_128.set_high().ok();
-            delay.delay(350.millis());
-            pins.pin_red_128.set_low().ok();
-        }*/
         if state.x.is_full() {
             state.x.remove(0);
             state.y.remove(0);
@@ -199,10 +183,7 @@ fn main() -> ! {
             sum_z += c;
         }
 
-        // rprintln!("state.z: {:?}", state.z);
-        // let sum_z2: i16 = state.z.iter().sum();
-
-        average((sum_x / size), (sum_y / size), (sum_z / size), &mut state);
+        average(sum_x / size, sum_y / size, sum_z / size, &mut state);
         if state.x.is_full() {
             let a: bool = detect(&state);
             if a {
@@ -250,6 +231,7 @@ fn detect(state: &State) -> bool {
     let x2: i16 = state.x[23];
     let x1: i16 = state.x[22];
     let mut avg: i16 = 0;
+    let avg_drop: i16 = 400;
     for a in 0..8 {
         avg += state.x_avg[a];
     }
@@ -257,7 +239,7 @@ fn detect(state: &State) -> bool {
     x1 > 0
         && x2 < 0
         && x2 - x1 < (0)
-        && x_avg2 - x_avg1 <= 400
+        && x_avg2 - x_avg1 <= avg_drop
         && x_avg1 > 0
         && x_avg2 > 0
         && avg - 20 <= state.x_avg[0]
